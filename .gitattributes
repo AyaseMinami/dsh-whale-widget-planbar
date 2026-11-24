@@ -1,0 +1,7 @@
+# 文本文件统一按 LF 入库；图片按二进制处理
+* text=auto
+*.webp binary
+*.png binary
+
+# 参考 diff 必须保持 LF：CRLF 的补丁在 Windows 上会影响 `git apply`
+planbar.patch text eol=lf

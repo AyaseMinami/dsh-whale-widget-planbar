@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>planbar preview</title>
+<style>
+  html, body { margin: 0; width: 700px; height: 700px; }
+  body {
+    display: flex; align-items: center; justify-content: center;
+    background:
+      radial-gradient(120% 90% at 78% 12%, rgba(255,255,255,.85) 0%, rgba(255,255,255,0) 60%),
+      linear-gradient(158deg, #f4f7fd 0%, #eaf0fb 46%, #dfe9f9 100%);
+    color: #536ba9;
+    font-family: "Microsoft YaHei UI", "Microsoft YaHei", "Segoe UI", sans-serif;
+    --dshw-u: 1.12px;
+    -webkit-font-smoothing: antialiased;
+  }
+  #host { color: #536ba9; }
+  /* 卡片本体由 bubblePlanBarEl 生成；这里只给宿主一个宽度参考，不画气泡外框。 */
+  #host { width: calc(var(--dshw-u) * 520); display: flex; justify-content: center; }
+</style>
+</head>
+<body>
+<div id="host"></div>
+<script>
+  // ---- 以下 5 个函数是挂件内部依赖的最小桩：语义与 0.4.2 原实现一致 ----
+  var apiModels = [{ id: 'opencode-go', name: 'OpenCode Go', plan: {
+    ok: true,
+    usedPct: 14, remainPct: 86, resetAt: 1797782806969,
+    windows: [
+      { key: '5h', label: '5h', usedPct: 6,  remainPct: 94, resetAt: 1795484926969 },
+      { key: 'week', label: '周', usedPct: 22, remainPct: 78, resetAt: 1795856806969 },
+      { key: 'month', label: '月', usedPct: 14, remainPct: 86, resetAt: 1797782806969 }
+    ]
+  }}];
+  function apiModelById(id) {
+    for (var i = 0; i < apiModels.length; i++) if (apiModels[i] && apiModels[i].id === id) return apiModels[i]
+    return null
+  }
+  function apiPlanOf(modelId) { var m = apiModelById(modelId); return (m && m.plan) || null }
+  function bubblePlanWinOf(m) { m = m || {}; return String(m.planWin || 'all') }
+  function apiPlanResetMs(t) {
+    if (t === null || t === undefined || t === '') return null
+    if (typeof t === 'number') return t < 1e12 ? t * 1000 : t
+    var pd = Date.parse(String(t)); return isFinite(pd) ? pd : null
+  }
+
+  // ---- 下面这段原样取自打过 planbar2 补丁的 assets/whale-widget.js ----
+function bubblePlanBarEl(mod, hostEl) {
+  mod = mod || {}
+  var U = 'var(--dshw-u)'
+  // 颜色工具：把 #rgb / #rrggbb / rgb() / rgba() 解析成 [r,g,b]；解析失败返回 null
+  function planBarRgb(v) {
+    var s = String(v == null ? '' : v).trim()
+    var m = /^#([0-9a-f]{3})$/i.exec(s)
+    if (m) {
+      var h = m[1]
+      return [parseInt(h.charAt(0) + h.charAt(0), 16), parseInt(h.charAt(1) + h.charAt(1), 16), parseInt(h.charAt(2) + h.charAt(2), 16)]
+    }
+    m = /^#([0-9a-f]{6})$/i.exec(s)
+    if (m) {
+      var h2 = m[1]
+      return [parseInt(h2.slice(0, 2), 16), parseInt(h2.slice(2, 4), 16), parseInt(h2.slice(4, 6), 16)]
+    }
+    m = /^rgba?\(\s*([0-9]{1,3})\s*[,\s]\s*([0-9]{1,3})\s*[,\s]\s*([0-9]{1,3})/i.exec(s)
+    if (m) return [Number(m[1]), Number(m[2]), Number(m[3])]
+    return null
+  }
+  function planBarA(c, a) { return 'rgba(' + c[0] + ',' + c[1] + ',' + c[2] + ',' + a + ')' }
+  function planBarNum(v) {
+    if (v === null || v === undefined || v === '') return null
+    var n = Number(v)
+    return isFinite(n) ? n : null
+  }
+  function planBarPct(v) {
+    if (v === null || v === undefined) return '--'
+    var n = Number(v)
+    if (!isFinite(n)) return '--'
+    // OpenCode / 智谱的 percent 可能是整数也可能是小数；保留最多两位，
+    // 去掉无意义的尾零（99.50% → 99.5%，100.00% → 100%）。
+    if (n > 0 && n < 0.01) return '<0.01%'
+    return n.toFixed(2).replace(/\.?0+$/, '') + '%'
+  }
+  function planBarWinLabel(w) {
+    var s = String((w && (w.label || w.key)) || '').trim()
+    // 与 gpt-niang 同一套称呼：5 小时 / 每周 / 每月；未知窗口保留厂商原文
+    if (s === '5h') return '5 小时'
+    if (s === '周') return '每周'
+    if (s === '月') return '每月'
+    return s || '本期'
+  }
+  function planBarResetText(t) {
+    var ms = apiPlanResetMs(t)
+    if (ms === null) return ''
+    var left = ms - Date.now()
+    if (!isFinite(left)) return ''
+    if (left <= 0) return '即将重置'
+    var mins = Math.floor(left / 60000)
+    if (mins < 1) return '即将重置'
+    if (mins < 60) return mins + ' 分钟后重置'
+    var hours = Math.floor(mins / 60)
+    var remMin = mins % 60
+    if (hours < 24) return hours + ' 小时' + (remMin > 0 ? ' ' + remMin + ' 分' : '') + '后重置'
+    var days = Math.floor(hours / 24)
+    var remHour = hours % 24
+    return days + ' 天' + (remHour > 0 ? ' ' + remHour + ' 小时' : '') + '后重置'
+  }
+  // 气泡文字色（自定义泡泡框可能设了 textColor）→ 卡片主色；
+  // 模块自己设了 color 时优先用它，方便单独强调某个订阅。
+  var hostColor = ''
+  try { hostColor = (hostEl && window.getComputedStyle) ? window.getComputedStyle(hostEl).color : '' } catch (err) {}
+  var base = planBarRgb(mod.color) || planBarRgb(hostColor) || [83, 107, 169]
+
+  var wrap = document.createElement('div')
+  wrap.className = 'dshwv-trow dshwv-planbar'
+  // 固定 384u 宽（不跟随 textBox 拉满）：经典椭圆框在上下 1/4 处只剩约 420u，
+  // 拉满会在顶/底行被描边裁掉——旧版 v2 用 requestAnimationFrame 收宽正是这个坑。
+  wrap.style.cssText = 'display:block;width:calc(' + U + ' * 384);max-width:100%;box-sizing:border-box;'
+    + 'text-align:left;white-space:normal;margin:0 auto;text-shadow:none;'
+    + 'font-variant-numeric:tabular-nums;line-height:1.2'
+
+  var p = apiPlanOf(mod.modelId)
+  var modelName = (apiModelById(mod.modelId) || {}).name || ''
+  if (!p || !p.ok) {
+    var note = document.createElement('div')
+    note.style.cssText = 'text-align:center;font-size:calc(' + U + ' * 30);line-height:1.35;color:' + planBarA(base, .72) + ';white-space:normal'
+    note.textContent = (modelName ? modelName + ' · ' : '') + (p && p.error ? String(p.error) : '额度读取中…')
+    wrap.appendChild(note)
+    return wrap
+  }
+
+  var win = bubblePlanWinOf(mod)
+  var list = []
+  if (p.windows && p.windows.length) {
+    for (var i = 0; i < p.windows.length; i++) {
+      var w = p.windows[i] || {}
+      if (win !== 'all' && String(w.key || '') !== win) continue
+      list.push(w)
+    }
+  }
+  if (!list.length) list.push({ label: '', usedPct: p.usedPct, remainPct: p.remainPct, resetAt: p.resetAt })
+  // 三窗口时卡片较高，整体上移给最底部的重置说明留出描边余量；窗口较少时保持居中。
+  var shiftU = list.length > 3 ? 24 : (list.length >= 3 ? 18 : 0)
+  if (shiftU > 0) wrap.style.transform = 'translateY(calc(' + U + ' * -' + shiftU + '))'
+
+  // 标题：小字、宽字距、居中（gpt-niang 的「剩余额度」）
+  var header = document.createElement('div')
+  header.textContent = '剩余额度'
+  header.style.cssText = 'text-align:center;font-size:calc(' + U + ' * 28);line-height:1.1;font-weight:600;'
+    + 'letter-spacing:.18em;text-indent:.18em;color:' + planBarA(base, .64) + ';margin-bottom:calc(' + U + ' * 8)'
+  wrap.appendChild(header)
+
+  function planBarLeftOf(cw) {
+    var used = planBarNum(cw && cw.usedPct)
+    if (used === null) {
+      var rem = planBarNum(cw && cw.remainPct)
+      if (rem !== null) used = 100 - rem
+    }
+    return used === null ? null : Math.max(0, Math.min(100, 100 - used))
+  }
+  // 小数会让数字变长（99.75% / 100.00%）；按最长的一行统一缩字号，
+  // 三行仍然等宽对齐：整数 62u → 一位/两位小数 56u → 更长 50u。
+  var pctU = 62
+  var maxPctLen = 0
+  for (var q = 0; q < list.length && q < 3; q++) {
+    var qt = planBarPct(planBarLeftOf(list[q]))
+    if (qt.length > maxPctLen) maxPctLen = qt.length
+  }
+  if (maxPctLen > 6) pctU = 50
+  else if (maxPctLen > 4) pctU = 56
+
+  // 单块：窗口名 / 大号剩余百分比 / 细进度条 / 重置说明
+  function addCard(cw, valU) {
+    var left = planBarLeftOf(cw)
+    var used = left === null ? null : 100 - left
+    var row = document.createElement('div')
+    row.style.cssText = 'margin-top:calc(' + U + ' * 6)'
+    var head = document.createElement('div')
+    head.style.cssText = 'display:flex;align-items:baseline;justify-content:space-between;gap:calc(' + U + ' * 10);white-space:nowrap'
+    var label = document.createElement('span')
+    label.textContent = planBarWinLabel(cw)
+    label.style.cssText = 'font-size:calc(' + U + ' * 34);line-height:1;font-weight:600;letter-spacing:.04em;color:' + planBarA(base, .82) + ';min-width:0;max-width:45%;overflow:hidden;text-overflow:ellipsis'
+    var val = document.createElement('span')
+    val.textContent = planBarPct(left)
+    val.style.cssText = 'font-size:calc(' + U + ' * ' + valU + ');line-height:1;font-weight:700;letter-spacing:-.02em;color:' + planBarA(base, 1)
+    head.appendChild(label)
+    head.appendChild(val)
+    var track = document.createElement('div')
+    track.style.cssText = 'height:calc(' + U + ' * 12);border-radius:999px;background:' + planBarA(base, .15) + ';overflow:hidden;margin-top:calc(' + U + ' * 5)'
+    var fill = document.createElement('div')
+    fill.style.cssText = 'height:100%;width:' + (left === null ? 0 : left) + '%;border-radius:999px;'
+      + 'background:linear-gradient(90deg,' + planBarA(base, .72) + ',' + planBarA(base, 1) + ')'
+    track.appendChild(fill)
+    row.appendChild(head)
+    row.appendChild(track)
+    var reset = planBarResetText(cw.resetAt)
+    if (reset) {
+      var cap = document.createElement('div')
+      cap.textContent = reset
+      cap.style.cssText = 'font-size:calc(' + U + ' * 24);line-height:1.15;color:' + planBarA(base, .75) + ';margin-top:calc(' + U + ' * 4);letter-spacing:.01em'
+      row.appendChild(cap)
+    }
+    try {
+      row.title = (used === null ? '剩余 --' : '已用 ' + planBarPct(used) + ' · 剩余 ' + planBarPct(left)) + (reset ? ' · ' + reset : '')
+    } catch (err) {}
+    wrap.appendChild(row)
+  }
+
+  // 已知厂商（OpenCode Go / 智谱 / Kimi）最多 3 个窗口；超出时只画前 3 块，
+  // 完整数据放进卡片 tooltip，避免多出来的一行把卡片撑出泡泡。
+  var MAX_ROWS = 3
+  var shown = 0
+  for (var j = 0; j < list.length && shown < MAX_ROWS; j++) { addCard(list[j], pctU); shown++ }
+  if (list.length > MAX_ROWS) {
+    var allText = []
+    for (var n = 0; n < list.length; n++) {
+      var nw = list[n] || {}
+      allText.push(planBarWinLabel(nw) + ' ' + planBarPct(planBarLeftOf(nw)))
+    }
+    try { wrap.title = (modelName ? modelName + '：' : '') + allText.join(' · ') } catch (err) {}
+  }
+  return wrap
+}
+
+  var host = document.getElementById('host')
+  host.appendChild(bubblePlanBarEl({ type: 'planbar', modelId: 'opencode-go', planWin: 'all' }, host))
+</script>
+</body>
+</html>

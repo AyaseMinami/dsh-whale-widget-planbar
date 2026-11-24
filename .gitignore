@@ -1,0 +1,4 @@
+# 本地产物（手动备份、调试副本）不入库
+*.orig
+*.bak
+*.rebuilt-check
